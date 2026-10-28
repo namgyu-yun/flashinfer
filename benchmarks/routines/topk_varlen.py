@@ -129,7 +129,7 @@ def testTopKVarlen(args):
     batch_size = args.batch_size
     max_seq_len = args.max_seq_len
     top_k = args.top_k
-    is_cuda_graph_compatible = False  # GVR LB uses dynamic counters; not graph-safe
+    is_cuda_graph_compatible = not args.no_cuda_graph
     run_refcheck = args.refcheck
     res = []
 
@@ -176,6 +176,18 @@ def testTopKVarlen(args):
     for j in range(1, top_k):
         pre_idx[:, j] = j
 
+    # gvr_2's default slab is per stream and cannot be created under capture;
+    # bench_gpu_time warms up on a different stream than the one it captures on.
+    gvr2_workspace = None
+    if "gvr_2" in backends:
+        from flashinfer.topk_varlen.kernels.gvr2_topk_host import workspace_bytes
+
+        gvr2_workspace = {
+            "gvr2_workspace": torch.zeros(
+                workspace_bytes(), dtype=torch.uint8, device=device
+            )
+        }
+
     if args.verbose >= 2:
         print(f"[VVERBOSE] {logits.shape = }, {seq_lens.shape = }, {top_k = }")
 
@@ -196,7 +208,12 @@ def testTopKVarlen(args):
             )
         elif backend == "gvr_2":
             return flashinfer.top_k_varlen(
-                logits, seq_lens, top_k, pre_idx=pre_idx, backend="gvr_2"
+                logits,
+                seq_lens,
+                top_k,
+                pre_idx=pre_idx,
+                backend="gvr_2",
+                workspace=gvr2_workspace,
             )
         else:
             raise ValueError(f"Unsupported backend: {backend}")
